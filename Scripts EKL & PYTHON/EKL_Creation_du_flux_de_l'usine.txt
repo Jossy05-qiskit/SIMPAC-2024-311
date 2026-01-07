@@ -1,0 +1,35 @@
+/* Action created by RTA15 9/16/2025 */
+
+/** Récupérer tous les cartons (Carton_1..Carton_14) **/
+
+let FFS_Item2 (FFS_Item)
+FFS_Item2 = GetItemFromName("RawMaterial",product)
+
+let List1(List)
+List1[1]= FFS_Item2
+
+/** Création des ressources ***/
+let FFS_Resource1, FFS_Resource2, FFS_Resource3 (FFS_Resource)
+FFS_Resource1 = CreateOrRetrieveResource(resource1)
+FFS_Resource2 = CreateOrRetrieveResource(resource2)
+FFS_Resource3 = CreateOrRetrieveResource(resource3)
+
+let FFS_ProductZone1, FFS_ProductZone3 (FFS_ProductZone)
+FFS_ProductZone1 = FFS_Resource1.AddProductZone()
+FFS_ProductZone3 = FFS_Resource3.AddProductZone()
+
+
+/** Création des flux ***/
+
+let FFS_CreateActivity1 (FFS_CreateActivity)
+FFS_CreateActivity1 = FFS_Resource1.AddCreateActivity(FFS_Item2)
+
+let FFS_ProductFlow1, FFS_ProductFlow2 (FFS_ProductFlow)
+FFS_ProductFlow1 = CreateProductFlow(FFS_Resource1, FFS_Resource2, List1, "Flow")
+FFS_ProductFlow2 = CreateProductFlow(FFS_Resource2, FFS_Resource3, List1, "Flow")
+
+let FFS_TransferActivity1 (FFS_TransferActivity)
+FFS_TransferActivity1 = FFS_Resource2.AddTransferActivity(FFS_Item2)
+
+let FFS_DispatchActivity1 (FFS_DispatchActivity)
+FFS_DispatchActivity1 = FFS_Resource3.AddDispatchActivity(FFS_Item2)

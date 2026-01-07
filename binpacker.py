@@ -27,18 +27,32 @@ class Renderer:
             yy = np.linspace(y, y + dy, 2)
             zz = np.linspace(z, z + dz, 2)
 
-            xx, yy = np.meshgrid(xx, yy)
+            xx, yy = np.meshgrid(xx, yy, indexing='ij')
+            print(f"DEBUG line 30: xx.shape={np.array(xx).shape}, yy.shape={np.array(yy).shape}")
+            yy_idx, xx_idx = np.meshgrid(yy, xx, indexing='xy')  # swap order explicitement
+            xx, yy = xx_idx, yy_idx
+            print(f"DEBUG after meshgrid: xx.shape={xx.shape}, yy.shape={yy.shape}")
 
             l1, l2 = xx.shape
             z0 = np.ones([l1, l2]) * z
             ax.plot_surface(xx, yy, z0, color=color)
             ax.plot_surface(xx, yy, z0 + dz, color=color)
 
-            yy, zz = np.meshgrid(yy, zz)
+            yy, zz = np.meshgrid(yy, zz, indexing='ij')
+            print(f"DEBUG line 37: yy.shape={np.array(yy).shape}, zz.shape={np.array(zz).shape}")
+            zz_idx, yy_idx = np.meshgrid(zz, yy, indexing='xy')
+            yy, zz = yy_idx, zz_idx
+            print(f"DEBUG after meshgrid: yy.shape={yy.shape}, zz.shape={zz.shape}")
+
             ax.plot_surface(x, yy, zz, color=color)
             ax.plot_surface(x + dx, yy, zz, color=color)
 
-            xx, zz = np.meshgrid(xx, zz)
+            xx, zz = np.meshgrid(xx, zz, indexing='ij')
+            print(f"DEBUG line 41: xx.shape={np.array(xx).shape}, zz.shape={np.array(zz).shape}")
+            zz_idx, xx_idx = np.meshgrid(zz, xx, indexing='xy')
+            xx, zz = xx_idx, zz_idx
+            print(f"DEBUG after meshgrid: xx.shape={xx.shape}, zz.shape={zz.shape}")
+
             ax.plot_surface(xx, y, zz, color=color)
             ax.plot_surface(xx, y + dy, zz, color=color)
         elif mode == 'stroke':

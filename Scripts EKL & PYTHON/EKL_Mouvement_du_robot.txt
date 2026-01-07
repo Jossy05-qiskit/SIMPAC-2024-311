@@ -1,0 +1,120 @@
+/* Action created by RTA15 9/15/2025 */
+
+let xPosOffset, yPosOffset, zPosOffset, POSOFFSET(Real)
+xPosOffset = 0
+yPosOffset = 0
+zPosOffset = 0
+POSOFFSET = 3000
+
+
+// Initializing robotArm's task manager
+let robotArmTaskMgr(DNBTaskManager)
+robotArmTaskMgr = GetTaskManager(robotArmRscOcc)
+
+// --- Choisir un index libre et créer le task
+let rscTask(DNBResourceTask)
+robotArmTaskMgr.CreateTask(1, rscTask)		// 1 is TaskType "Service task"
+rscTask.Name = "RobotMotion"
+
+
+let motionInst(RscLogicInstruction)
+
+
+let cartonPickTransformList(List)
+cartonPickTransformList[1] = 927.702
+cartonPickTransformList[2] = 6135.82
+cartonPickTransformList[3] = 1612
+cartonPickTransformList[4] = 0
+cartonPickTransformList[5] = -PI			// 10deg for 5th DOF since it's a rotation command
+cartonPickTransformList[6] = 0
+
+
+// Initializing the CartCoord Excel Sheet
+let cartCoordSheet(DTSheetType)
+set cartCoordSheet = CreateSheet("PositionByEKL")
+
+
+// Initializing values to keep track of the rows and columns
+let noOfRows(Integer)
+noOfRows = cartCoordSheet.RowsNb
+let noOfCols(Integer)
+noOfCols = cartCoordSheet.ColumnsNb
+
+// --- Une itération = 1 ligne (x,y,z,y,p,r) de PositionByEKL ---
+// NB: on lit TOUTES les lignes de la feuille (<= noOfRows)
+
+let coordRow(Integer)
+coordRow = 1
+
+for coordRow while coordRow < noOfRows
+{
+	// 1) Recréer un tmpCartList PROPRE pour la ligne courante
+	let tmpCartList(List)
+	
+	let coordCol(Integer)
+	coordCol = 1
+	for coordCol while coordCol <= noOfCols
+	{
+		let tmpCoord(Real)
+		tmpCoord = cartCoordSheet.CellAsReal(coordRow, coordCol)
+		tmpCartList.Append(tmpCoord)
+	}
+	
+	// 2) Appliquer l’offset XYZ du robot (comme dans ton code)
+	let tmpCartListX, tmpCartListY, tmpCartListZ, offsetCartListX, offsetCartListY, offsetCartListZ(Real)
+	tmpCartListX = tmpCartList.GetItem(1)			// x
+	tmpCartListY = tmpCartList.GetItem(2)			// y
+	tmpCartListZ = tmpCartList.GetItem(3)           // z
+	
+	offsetCartListX = tmpCartListX + xPosOffset
+	offsetCartListY = tmpCartListY + yPosOffset
+	offsetCartListZ = tmpCartListZ + zPosOffset
+	
+	tmpCartList.SetItem(offsetCartListX, 1)			// x corrigé
+	tmpCartList.SetItem(offsetCartListY, 2)			// y corrigé
+	tmpCartList.SetItem(offsetCartListZ, 3)         // z corrigé
+	
+	// 3) Construire la liste des 4 mouvements pour CE carton
+	let motionList (List)
+	motionList.Append(cartonPickTransformList)		// 1) HOME
+	motionList.Append(tmpCartList)                 // 3) aller déposer (ligne coordRow)
+	
+	
+	// 4) Générer les motions + GRAB (p==1) + RELEASE (p==3)
+	let p(Integer)
+	p = 1
+	
+	let grabInstCarton(RscLogicGrab)  // mémorise le Grab de CE carton
+	
+	for p while p <= motionList.Size()
+	{
+		let pos(List)
+		pos = motionList[p]
+		
+		let tmpRobotMotion(DNBRobotMotion)
+		rscTask.CreateMotionActivity(false, motionInst, tmpRobotMotion)
+		tmpRobotMotion.SetCartesianTarget(pos)
+		tmpRobotMotion.SetMotionType(1)  // LINEARMOVE
+		
+		// --- PRISE : sur le 1er mouvement
+		if p == 1
+		{
+			let grabInst(RscLogicGrab)
+			// On nomme avec l’index de ligne pour tracer: coordRow
+			grabInst = rscTask.CreateGrabInstruction("GrabCarton_"+ToString(coordRow), -1)
+			grabInst.SetRscGrabbingSimulationSensorDetection(1)
+			grabInstCarton = grabInst
+		}
+		
+		// --- DÉPOSE : sur le 2e mouvement
+		if p == 2
+		{
+			let relInst(RscLogicRelease)
+			relInst = rscTask.CreateReleaseInstruction("ReleaseCarton_"+ToString(coordRow), -1)
+			if grabInstCarton <> NULL
+			{
+				relInst.SetRscReleaseSpecificGrabbing(grabInstCarton)
+			}
+		}
+	}
+}

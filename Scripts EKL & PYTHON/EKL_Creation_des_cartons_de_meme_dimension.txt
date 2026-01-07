@@ -1,0 +1,218 @@
+/* Action created by RTA15 9/16/2025 */
+
+let pPallCellOcc(ProductOccurrence)
+pPallCellOcc = parentPallCellOcc
+let pPallCellRef(VPMReference)
+pPallCellRef = pPallCellOcc.Reference
+
+// Initializing the Excel Sheet
+let rscSheet(DTSheetType)
+Set rscSheet = CreateSheet("ResourcePackage")
+
+let rscRowIndex(Integer)		// The row in the sheet
+rscRowIndex = 1
+let rscColIndex(Integer)		// The column in the sheet
+rscColIndex = 1
+let rscNoOfCols(Integer)		// The number of columns in the rscSheet
+rscNoOfCols = rscSheet.ColumnsNb
+
+// Initializing the table column identifiers
+let CARTONCOL(Integer)
+CARTONCOL = 1
+
+
+// Initializing the column length information
+let cartonColLength(Integer)
+let rscColumnLengthList(List)
+
+let tmpValueCheck(String)
+let emptyString(String)
+emptyString = ""
+let loopCheck(Integer)
+
+for rscColIndex while rscColIndex <= rscNoOfCols
+{
+	rscRowIndex = 1
+	tmpValueCheck = rscSheet.CellAsString(rscRowIndex, rscColIndex)
+	loopCheck = 2
+	for loopCheck while loopCheck > 1
+	{
+		if (tmpValueCheck <> emptyString)
+		{
+			rscRowIndex = rscRowIndex + 1
+			tmpValueCheck = rscSheet.CellAsString(rscRowIndex, rscColIndex)
+		}
+		else
+		{
+			loopCheck = 1
+			rscColumnLengthList.Append(rscRowIndex-1)
+		}
+	}
+}
+
+
+cartonColLength = rscColumnLengthList[CARTONCOL]
+
+// Initialzing x and y positions variables, so combinations are in different positions
+let xPosOffset, yPosOffset, POSOFFSET(Real)
+xPosOffset = 0
+yPosOffset = 0
+POSOFFSET = 3000
+
+// Beginning of the loop in order to create every possible combination between robotArms and weldGuns
+let cartonIndex(Integer)
+let cartonName(String)
+cartonIndex = 1
+
+
+for cartonIndex while cartonIndex <= cartonColLength
+{	
+	
+	// --- Lire les noms de la ligne courante ---
+	
+	cartonName    = rscSheet.CellAsString(cartonIndex, CARTONCOL)
+	
+	
+	// Créer Cellules d’organisation (une “ressources robot+weldgun”, une “carton+palette+convoyeur”)
+	let newMfgCell2Ref(VPMReference)
+	let newMfgCell2Inst(VPMInstance)
+	
+	let newMfgCell2Name(String)
+	newMfgCell2Name = "ITEMCARTON"
+	
+	newMfgCell2Ref = new("Organizational", newMfgCell2Name,  NULL)
+	
+	
+	let newMfgCell2InstName(String)
+	newMfgCell2InstName = "Combination_" + 1 + "_" + 1
+	
+	newMfgCell2Inst = new("VPMInstance", newMfgCell2InstName, pPallCellRef, newMfgCell2Ref)
+	
+	
+	let cartonLength, cartonWidth, cartonHeight(Real)
+	cartonLength = 300
+	cartonWidth = 300
+	cartonHeight = 300
+	
+	// Seed pour l'aléatoire (basé sur l'heure)
+	let d(Date)
+	let sDate(String)
+	let seedI(Integer)
+	
+	sDate  = DateFormat("%H%M%S", BuildDate())
+	seedI  = sDate->ToReal():Integer
+	SRand(seedI)  // initialise la séquence de Rand()
+	
+	let tailleCarton(List)
+	
+	// 2. Créer 246 cartons avec la boucle de création des tailles avec un pseudo-random
+	
+	let k(Integer)
+	k = 0
+	for k while k <= 245
+	{
+		// Aléatoire entre 300 et 900
+		let lengthVar(Real)
+		lengthVar = 300.0 + Rand() * (900 - 300)
+		
+		// Largeur aléatoire entre 500 et 900
+		let widthVar(Real)
+		widthVar = 300.0 + Rand() * (900.0 - 500)
+		
+		let cartonData(List)
+		cartonData = List(k, lengthVar, widthVar, cartonHeight)
+		tailleCarton.Append(cartonData)
+	}
+	
+	let baseCartonRef(VPMReference)
+	baseCartonRef = NULL
+	let cartonTitle (String)
+	
+	if (cartonName <> "")
+	{
+		// Query Creation Declaration for carton
+		let cartonQuery(PLMQuery)
+		let cartonResults(List)
+		let cartonCurrentResult(PLMQueryResult)
+		let cartonCurrentResultLoaded(VPMReference)
+		
+		// Creating the carton Query
+		cartonQuery = CreatePLMQuery("VPMReference")
+		cartonQuery.AddCriterion("PLM_ExternalID", cartonName)
+		
+		// Running the carton Query
+		cartonResults = cartonQuery.RunQuery()
+		
+		for cartonCurrentResult inside cartonResults
+		{
+			set cartonCurrentResultLoaded = cartonCurrentResult.LoadResult()
+		}
+		
+		// Initializing the carton VPMReference
+		let cartonRef(VPMReference)
+		cartonRef = cartonCurrentResultLoaded
+		cartonTitle = cartonRef.V_Name
+		
+		
+		if (cartonRef <> NULL)
+		{
+			baseCartonRef = cartonRef
+		}
+		
+		
+		// Génération des 26 cartons à la même position
+		let i(Integer)
+		i = 0
+		for i while i < tailleCarton.Size()
+		{	
+			
+			// Création instance
+			
+			if (baseCartonRef == NULL)
+			{
+				Notify("Aucune référence carton trouvée : impossible de générer les cartons.")
+				continue
+			}
+			
+			// Nom unique
+			let cartonInstName(String)
+			cartonInstName = "Carton_" + ToString(i + 1)
+			
+			// Création instance
+			let cartonInst (VPMInstance)
+			cartonInst = new("VPMInstance", cartonInstName, newMfgCell2Ref, baseCartonRef)
+			
+			
+			// Position des cartons : tous au même endroit sur le convoyeur
+			
+			let cartonIniTransform(RscTransform)
+			cartonIniTransform = GetRscTransform()
+			cartonIniTransform.SetXYZ(xPosOffset, yPosOffset + 4000, 0)
+			cartonIniTransform.SetRPY(0,0,0)
+			
+			
+			let cartonIniMatrix (Matrix)
+			cartonIniMatrix = cartonInst.PositionMatrix
+			let transformCoefIni(List)
+			transformCoefIni = cartonIniTransform.GetTransformCoefficients()
+			
+			if transformCoefIni.Size() == 12
+			{
+				cartonIniMatrix.Set(1,1,transformCoefIni[1])
+				cartonIniMatrix.Set(2,1,transformCoefIni[2])
+				cartonIniMatrix.Set(3,1,transformCoefIni[3])
+				cartonIniMatrix.Set(1,2,transformCoefIni[4])
+				cartonIniMatrix.Set(2,2,transformCoefIni[5])
+				cartonIniMatrix.Set(3,2,transformCoefIni[6])
+				cartonIniMatrix.Set(1,3,transformCoefIni[7])
+				cartonIniMatrix.Set(2,3,transformCoefIni[8])
+				cartonIniMatrix.Set(3,3,transformCoefIni[9])
+				cartonIniMatrix.Set(1,4,transformCoefIni[10])
+				cartonIniMatrix.Set(2,4,transformCoefIni[11])
+				cartonIniMatrix.Set(3,4,transformCoefIni[12])
+				cartonInst.PositionMatrix = cartonIniMatrix
+			}
+		}
+	}
+}
+

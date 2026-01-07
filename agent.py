@@ -1,399 +1,637 @@
 import numpy as np
 
 import tensorflow as tf
-from tensorflow.keras import Input, Model
-from tensorflow.keras.layers import LeakyReLU, Lambda, Conv2D, GlobalAveragePooling2D, Flatten, Dense, MaxPooling2D, Conv2DTranspose, RepeatVector, Reshape, concatenate, BatchNormalization
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.initializers import orthogonal
 
-from env import *
-import collections, itertools
+from collections import deque
 
-def q_net(k=1):
-    weight_decay = 0.0005
-    hmap_in = Input((32, 32, 1))
-    amap_in = Input((32, 32, 1))
-    imap_in = Input((k, 3))
-    imap_x = Flatten()(imap_in)
-    const_in = Input((32, 32, 1))
-    
-    x = concatenate([hmap_in, amap_in, const_in], axis=-1)
-    
-    x = Conv2D(64, 11, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Conv2D(128, 9, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Conv2D(256, 7, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Conv2D(512, 5, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    x = Conv2D(1024, 3, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    
-    x = Conv2D(2048, 2, strides=1, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    x = BatchNormalization()(x)
-    
-    x = GlobalAveragePooling2D()(x)
-    
-    emb = Dense(256, kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(imap_x)
-    
-    x = concatenate([x, emb], axis=-1)
-    
-    x = Dense(1000, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    
-    x = Dense(100, activation='relu', kernel_regularizer=l2(weight_decay), kernel_initializer='he_uniform')(x)
-    
-    x = Dense(1, activation='linear')(x)
-    
-    outputs = x
-    model = Model([const_in, hmap_in, amap_in, imap_in], outputs)
-    return model
+
+
+def resize_map_nn(h_map, out_shape=(32, 32)):
+
+    """Nearest-neighbour downsample 2D map (input shape: (D, W)) to target shape."""
+
+    if h_map.size == 0:
+
+        return np.zeros(out_shape, dtype='float32')
+
+    D, W = h_map.shape
+
+    si = np.linspace(0, D - 1, out_shape[0]).astype(int)
+
+    sj = np.linspace(0, W - 1, out_shape[1]).astype(int)
+
+    return h_map[np.ix_(si, sj)]
+
+
+
+def prepare_model_input(h_maps, target_shape=(32, 32)):
+
+    """Convert height maps to model input format (n_bins, 32, 32, 1)."""
+
+    arr = np.array(h_maps, dtype='float32')
+
+    if arr.ndim == 2:
+
+        arr = np.expand_dims(arr, 0)
+
+    resized = np.stack([resize_map_nn(h, out_shape=target_shape) for h in arr])
+
+    maxs = np.maximum(1.0, np.max(resized, axis=(1, 2), keepdims=True))
+
+    resized = resized.astype('float32') / maxs
+
+    return resized[..., np.newaxis]
+
+
 
 class Agent:
-    def __init__(self, env=MultiBinPackerEnv(n_bins=2, max_bins=-1, size=(32, 32, 32), k=10, verbose=True), train=True, verbose=True, visualize=False, batch_size=32):
+
+    def __init__(self, env, visualize=False, q_net=None, train=False, verbose=False, batch_size=1):
+
         self.env = env
-        
-        self.gamma = 0.95
-        
-        self.eps = 1.0
-        self.eps_min = 0.05
-        self.eps_decay = 0.99
-        
-        self.ep_history = []
-        
-        self.warmup_epochs = 20
-        self.warmup_lr = 1e-5
-        self.learning_rate = 1e-3
-        self.lr_min = 1e-5
-        self.lr_drop = 10000
-        self.epoch = 0
-        self.update_epochs = 10
+
+        self.visualize = visualize
+
+        self.q_net = q_net
+
+        self.train = train
+
+        self.verbose = verbose
 
         self.batch_size = batch_size
-        
-        self.__train = train
 
-        self.verbose = verbose
-        self.visualize = visualize
-        
-        if self.__train:
-            self.q_net = q_net(k=env.k - 1)
-            self.q_net_target = q_net(k=env.k - 1)
-            self.q_optimizer = tf.keras.optimizers.Adam(learning_rate=self.warmup_lr)
-            self.memory = collections.deque(maxlen=1000000)
-        else:
-            self.q_net = None
-            self.q_net_target = None
-            self.q_optimizer = None
-            self.memory = None
-    
-    def select(self, state):
-        items, h_maps, actions = state
-        action_space = indices(actions)
-        
-#         print('actions: ', len(action_space))
-        
-        r = np.random.random()
-        if r < self.eps:
-            action = action_space[np.random.choice(len(action_space))]
-        else:
-            q = self.Q(state)
-            action = action_space[np.argmax(q)]
-            r = np.max(q)
-            
-        return action, r
-    
-    def Q_inputs(self, state, action=None):
-        W, H, D = self.env.size
-        
-        items, h_maps, actions = state
-        if action is None:
-            action_space = indices(actions)
-        else:
-            i, j, k = action
-            action_space = [(i, j, k)]
-            
-        imaps = [self.env.i_map(i, items) for i in range(len(self.env.packers))]
-            
-        hmap_in = []
-        amap_in = []
-        imap_in = []
-        
-        # item, bin, rotation_placement
-        for i, j, k in action_space:
-            _, (x, y, z), (w, h, d), _ = actions[i][j][k]
-            amap = self.env.p_map(j, (x, y, z, w, h, d))
-            amap = np.where(amap == 0, h_maps[j], y + h) / H
+        self.final_packers = []
 
-            hmap = np.full(h_maps[j].shape, np.amax(amap))
+        self.eps = 0.0
 
-            imap = imaps[j][np.arange(len(items)) != i]
-#             print(hmap, amap, imap)
+        self.ep_history = []  # [X] AJOUTER CETTE LIGNE
 
-            hmap_in.append(hmap)
-            amap_in.append(amap)
-            imap_in.append(imap)
-            
-        hmap_in, amap_in, imap_in = map(np.asarray, (hmap_in, amap_in, imap_in))
-        hmap_in = hmap_in[..., None]
-        amap_in = amap_in[..., None]
-        const_in = np.ones(hmap_in.shape)
-        
-        return [const_in, hmap_in, amap_in, imap_in]
-    
-    def Q(self, state, action=None):
-        const_in, hmap_in, amap_in, imap_in = self.Q_inputs(state, action)
-        
-        batch_size = self.batch_size
-        sections = np.cumsum([self.batch_size] * int(np.ceil(const_in.shape[0] / batch_size) - 1))
-        batches = map(lambda data: map(lambda x: x.copy(), np.split(data, sections, axis=0)), (const_in, hmap_in, amap_in, imap_in))
-        
-        outputs = []
-        for const_in, hmap_in, amap_in, imap_in in zip(*batches):
-            # print(const_in.shape)
-            q = self.q_net([const_in, hmap_in, amap_in, imap_in])
-#             print('const_in.shape')
-            outputs.append(q)
-        q = np.concatenate(outputs, axis=0)
-#         print(q.shape)
-        return q
 
-    def lr_scheduler(self, epoch):
-        if epoch < self.warmup_epochs:
-            lr = self.warmup_lr
-        else:
-            lr = self.learning_rate * (0.5 ** (epoch / self.lr_drop))
-        return max(self.lr_min, lr)
-            
-    def train(self, history):
-        q_inputs = []
-        q_targets = []
-        
-        for state, action, next_state, reward, done in history:
-            const_in, hmap_in, amap_in, imap_in = self.Q_inputs(state, action)
-            q_inputs.append([const_in[0], hmap_in[0], amap_in[0], imap_in[0]])
-            if done:
-                q_target = reward
-            else:
-#                 print(np.amax(self.Q(next_state)))
-                q_target = reward + self.gamma * np.amax(self.Q(next_state))
-#                 print(q_target)
-            q_targets.append([q_target])
-            
-        const_in, hmap_in, amap_in, imap_in = zip(*q_inputs)
-        q_inputs = [np.asarray(const_in), np.asarray(hmap_in), np.asarray(amap_in), np.asarray(imap_in)]
-        q_targets = np.asarray(q_targets)
-#         print('q_targets', q_targets)
-#         print([result for result in map(lambda inps: (inps.shape, np.amin(inps), np.amax(inps), np.mean(inps)), q_inputs)], q_targets)
-        return self.fit(q_inputs, q_targets)
-    
-    def fit(self, q_inputs, q_targets):
-        with tf.GradientTape() as tape:
-#             print(q_inputs)
-            q = self.q_net_target(q_inputs)
-            # print(tf.keras.losses.MeanSquaredError()(q_targets, q))
-            loss = tf.reduce_mean(tf.square(q_targets - q))
-            loss = tf.keras.losses.MeanSquaredError()(q_targets, q)
-#             print('q', q)
-#             print('loss', loss)
-            
-#         print(list(zip(q, q_targets)))
-        grad = tape.gradient(loss, self.q_net_target.trainable_variables)
-        
-#         gradient clipping
-#         if self.epoch < self.warmup_epochs:
-#             grad = [tf.clip_by_value(value, -1e-5, 1e-5) for value in grad]
-        
-        self.q_optimizer.apply_gradients(zip(grad, self.q_net_target.trainable_variables))
-        
-        self.q_optimizer.lr.assign(self.lr_scheduler(self.epoch))
-        
-        self.epoch += 1
-    
-#         print([a * 0.5 + b * (1 - 0.5) for a, b in zip(self.q_net.get_weights(), self.q_net_target.get_weights())])
-        if self.epoch % self.update_epochs == 0:
-            print('update')
-            self.q_net.set_weights([a * 0.5 + b * (1 - 0.5) for a, b in zip(self.q_net.get_weights(), self.q_net_target.get_weights())])
-        return loss
-    
-    def run(self, max_ep=1, verbose=False, train=None):
-        if train is None:
-            train = self.__train
-            
-        iters = (i for i, _ in enumerate(iter(bool, True))) if max_ep == -1 else range(max_ep)
 
-        for ep in iters:
-            if verbose:
-                print(f'ep {ep}:')
+    def _expected_item_length(self, default=4):
+
+        """Return expected lookahead length (k) for the model's items input.
+
+        Priority:
+
+        1) Infer from `self.q_net` last input tensor shape (batch, k, 3)
+
+        2) Use `env.conveyor.k` if available
+
+        3) Fallback to `default`
+
+        """
+
+        # 1) Inspect the model input shape if possible
+
+        try:
+
+            if self.q_net is not None and hasattr(self.q_net, 'inputs') and self.q_net.inputs:
+
+                shp = self.q_net.inputs[-1].shape  # TensorShape like (None, k, 3)
+
+                if len(shp) >= 3 and shp[1] is not None:
+
+                    return int(shp[1])
+
+        except Exception:
+
+            pass
+
+
+
+        # 2) Conveyor-provided k
+
+        try:
+
+            if hasattr(self.env, 'conveyor') and self.env.conveyor is not None and hasattr(self.env.conveyor, 'k'):
+
+                return int(self.env.conveyor.k)
+
+        except Exception:
+
+            pass
+
+
+
+        # 3) Fallback
+
+        return default
+
+
+
+    # === Nouveau: constructeur de modèle paramétrable par lookahead (k) ===
+
+    def build_q_net(self, lookahead=10, hmap_shape=(32, 32, 1)):
+
+        """Construit un petit réseau multi-entrées:
+
+        - 3 entrées height-map (32x32x1)
+
+        - 1 entrée items (k x 3) normalisée
+
+        Retourne un modèle Keras prêt à l'entraînement si self.train=True.
+
+        """
+
+        import tensorflow as tf
+
+
+
+        inputs = []
+
+        features = []
+
+
+
+        # 3 branches CNN pour les height maps
+
+        for i in range(3):
+
+            inp = tf.keras.Input(shape=hmap_shape, name=f"hmap_{i+1}")
+
+            x = tf.keras.layers.Conv2D(16, 3, padding='same', activation='relu')(inp)
+
+            x = tf.keras.layers.MaxPool2D(pool_size=2)(x)
+
+            x = tf.keras.layers.Conv2D(32, 3, padding='same', activation='relu')(x)
+
+            x = tf.keras.layers.GlobalAveragePooling2D()(x)
+
+            inputs.append(inp)
+
+            features.append(x)
+
+
+
+        # Encodage de la séquence d'items (k,3)
+
+        items_in = tf.keras.Input(shape=(lookahead, 3), name='items')
+
+        y = tf.keras.layers.Masking(mask_value=0.0)(items_in)
+
+        y = tf.keras.layers.Flatten()(y)
+
+        y = tf.keras.layers.Dense(64, activation='relu')(y)
+
+        inputs.append(items_in)
+
+        features.append(y)
+
+
+
+        # Fusion + tête Q-value
+
+        z = tf.keras.layers.Concatenate()(features)
+
+        z = tf.keras.layers.Dense(128, activation='relu')(z)
+
+        z = tf.keras.layers.Dense(64, activation='relu')(z)
+
+        out = tf.keras.layers.Dense(1, activation='linear', name='q_value')(z)
+
+
+
+        model = tf.keras.Model(inputs=inputs, outputs=out, name=f"deeppack_qnet_k{lookahead}")
+
+        if self.train:
+
+            model.compile(optimizer=tf.keras.optimizers.Adam(1e-3), loss='mse')
+
+        return model
+
+    
+
+    def _select_action_with_model(self, state, actions):
+
+        """Sélectionne la meilleure action selon le Q-network (multi-input)."""
+
+        items, h_maps, action_list = state
+
+        
+
+        if not self.q_net:
+
+            return self._select_first_valid_action(actions)
+
+        
+
+        # === PRÉPARER LES INPUTS POUR LE MODÈLE ===
+
+        best_action = None
+
+        best_q_value = float('-inf')
+
+        evaluated_actions = 0
+
+        
+
+        try:
+
+            from scipy.ndimage import zoom  # [X] REMPLACER cv2 par scipy
+
+            
+
+            # Préparer les 3 height maps (prendre les 3 premiers bins, padding si nécessaire)
+
+            h_map_inputs = []
+
+            for i in range(3):
+
+                if i < len(h_maps):
+
+                    h_map = h_maps[i]
+
+                else:
+
+                    # Padding avec des zéros si moins de 3 bins
+
+                    h_map = np.zeros((self.env.bin_size[0], self.env.bin_size[1]), dtype='float32')
+
                 
+
+                # Normaliser
+
+                h_map_normalized = h_map / self.env.bin_size[2]
+
+                
+
+                # Redimensionner avec scipy.ndimage.zoom au lieu de cv2.resize
+
+                zoom_factors = (32 / h_map_normalized.shape[0], 32 / h_map_normalized.shape[1])
+
+                h_map_resized = zoom(h_map_normalized, zoom_factors, order=1)  # order=1 = bilinear
+
+                
+
+                h_map_inputs.append(h_map_resized.reshape(1, 32, 32, 1).astype('float32'))
+
+            
+
+            # Préparer les items avec une longueur attendue dynamique (k)
+
+            k_expected = self._expected_item_length(default=4)
+
+            items_input = np.zeros((1, k_expected, 3), dtype='float32')
+
+            limit = min(k_expected, len(items))
+
+            for i in range(limit):
+
+                if items[i] is not None:
+
+                    # Normaliser les dimensions par rapport à la taille du bin
+
+                    items_input[0, i, 0] = items[i][0] / self.env.bin_size[0]
+
+                    items_input[0, i, 1] = items[i][1] / self.env.bin_size[1]
+
+                    items_input[0, i, 2] = items[i][2] / self.env.bin_size[2]
+
+            
+
+            # Combiner tous les inputs
+
+            model_inputs = h_map_inputs + [items_input]
+
+            
+
+            # Prédire la Q-value
+
+            q_values = self.q_net.predict(model_inputs, verbose=0)
+
+            base_q_value = float(q_values[0][0])
+
+            
+
+            if self.verbose:
+
+                print(f"    [...] Q-value de base: {base_q_value:.4f}")
+
+            
+
+            # Évaluer chaque action avec ajustement selon la hauteur
+
+            for item_idx, item_actions in enumerate(action_list):
+
+                for bin_idx, bin_actions in enumerate(item_actions):
+
+                    if not bin_actions:
+
+                        continue
+
+                    
+
+                    # AUGMENTER LE NOMBRE DE POSITIONS ÉVALUÉES
+
+                    n_positions = min(len(bin_actions), 50)  # [X] CHANGÉ de 10 à 30
+
+                    
+
+                    for pos_idx in range(n_positions):
+
+                        position = bin_actions[pos_idx]
+
+                        z_penalty = position[2] / self.env.bin_size[2]
+
+                        adjusted_q = base_q_value - (0.05 * z_penalty)  # [X] 0.05 au lieu de 0.10
+
+                        
+
+                        evaluated_actions += 1
+
+                        
+
+                        if adjusted_q > best_q_value:
+
+                            best_q_value = adjusted_q
+
+                            best_action = (item_idx, bin_idx, pos_idx)
+
+                            
+
+                            if self.verbose:
+
+                                print(f"    [...] Nouvelle meilleure action: item={item_idx}, bin={bin_idx}, pos={pos_idx}, Q={adjusted_q:.4f}")
+
+            
+
+            if self.verbose and best_action:
+
+                print(f"  [X] Action finale: {best_action}, Q={best_q_value:.4f} ({evaluated_actions} évaluées)")
+
+        
+
+        except Exception as e:
+
+            if self.verbose:
+
+                print(f"  [X][X] Erreur dans _select_action_with_model: {e}")
+
+            import traceback
+
+            traceback.print_exc()
+
+            return self._select_first_valid_action(actions)
+
+        
+
+        return best_action if best_action else self._select_first_valid_action(actions)
+
+    
+
+    def run(self, n_episodes=-1, verbose=False):
+
+        """Exécute l'agent pour n_episodes."""
+
+        print(f"DEBUG agent.run(): Starting with n_episodes={n_episodes}")
+
+        
+
+        episode = 0
+
+        while episode != n_episodes:
+
+            print(f"DEBUG agent.run(): Episode {episode} starting...")
+
+            
+
             state = self.env.reset()
-            ep_reward = 0
+
+            done = False
+
+            episode_reward = 0
+
+            steps = 0
+
+            utils = []
+
             
-            history = []
-            
-            for step in itertools.count():
-                if verbose:
-                    print(f'\nstep {step}')
-                    
-                items, h_map, actions = state
-                if len(actions) == 0: raise Exception('0 actions')
-                action, r = self.select(state)
+
+            while not done:
+
+                steps += 1
+
+                if verbose or self.verbose:
+
+                    print(f"  Step {steps}: checking actions...")
+
                 
-                if verbose:
-                    print(f'possible actions: {len(actions)}')
-                    print(f'action: {action}')
-                    print(f'placement: {actions[action[0]][action[1]][action[2]]}')
+
+                items, h_maps, actions = state
+
                 
-                yield actions[action[0]][action[1]][action[2]]
-                
-                next_state, reward, done = self.env.step(action)
-                
-                history.append((state, action, next_state, reward, done))
-                
-                if self.visualize:
-                    for i, packer in enumerate(self.env.packers):
-                        packer.render().savefig(f'./outputs/{ep}_{step}_{i}.jpg')
-                    
-                ep_reward += reward
-                if done:
+
+                if not actions or len(actions) == 0:
+
+                    print(f"    Found 0 valid actions")
+
+                    done = True
+
                     break
-                state = next_state
+
                 
-            loss = None
-            if train:
-                self.memory.extend(history)
-                if len(self.memory) > 1000:
-                    print('update model')
-                    history = [self.memory[i] for i in np.random.choice(len(self.memory), 128)]
-                    loss = self.train(history)
+
+                total_actions = sum(
+
+                    sum(len(bin_acts) for bin_acts in item_acts) 
+
+                    for item_acts in actions
+
+                )
+
+                
+
+                if verbose or self.verbose:
+
+                    print(f"    Found {total_actions} valid actions")
+
+                
+
+                # === SÉLECTION D'ACTION AVEC MODÈLE ===
+
+                if self.q_net and np.random.rand() > self.eps:
+
+                    # Exploitation : utiliser le modèle
+
+                    action = self._select_action_with_model(state, actions)
+
+                else:
+
+                    # Exploration ou pas de modèle : greedy
+
+                    action = self._select_first_valid_action(actions)
+
+                
+
+                if action is None:
+
+                    print(f"    No valid action selected, done=True")
+
+                    done = True
+
+                    break
+
+                
+
+                # Exécuter l'action
+
+                next_state, reward, done = self.env.step(action)
+
+                episode_reward += reward
+
+                utils.append(reward)
+
+                state = next_state
+
             
-            self.ep_history.append(([packer.space_utilization() for packer in self.env.used_packers], self.env.used_bins, ep_reward))
+
+            print(f"Episode {episode} finished: reward={episode_reward:.4f}, steps={steps}, bins={len(self.env.used_packers)}")
+
             
-            yield None
+
+            # === ENREGISTRER DANS ep_history ===
+
+            self.ep_history.append((utils, len(self.env.used_packers), episode_reward))
+
             
-            utils = [round(packer.space_utilization() * 100, 2) for packer in self.env.used_packers]
-            if self.verbose: print(f'Episode {ep}, util: {utils}, used bins: {self.env.used_bins}, ep_reward: {ep_reward:.2f}, memory: {len(self.memory) if self.memory is not None else None}, eps: {self.eps:.2f}, loss: {loss}, lr: {self.q_optimizer.lr.numpy() if self.q_optimizer is not None else None}')
+
+            yield (episode, episode_reward, utils)
+
+            
+
+            if n_episodes == 1 or n_episodes == -1:
+
+                print(f"DEBUG agent.run(): Single episode complete, stopping")
+
+                break
+
+            
+
+            episode += 1
+
+        
+
+        print(f"DEBUG agent.run(): All episodes completed")
+
+    
+
+    def _select_first_valid_action(self, actions):
+
+        """Retourne la première action valide."""
+
+        for item_idx, item_actions in enumerate(actions):
+
+            for bin_idx, bin_actions in enumerate(item_actions):
+
+                if bin_actions and len(bin_actions) > 0:
+
+                    return (item_idx, bin_idx, 0)
+
+        return None
+
+
 
 class HeuristicAgent:
-    def __init__(self, heuristic, env=MultiBinPackerEnv(n_bins=2, max_bins=-1, size=(32, 32, 32), k=10, verbose=True), verbose=True, visualize=False):
+
+    def __init__(self, heuristic_fn, env, verbose=False, visualize=False):
+
+        self.heuristic_fn = heuristic_fn
+
         self.env = env
-        
-        self.heuristic = heuristic
-        self.ep_history = []
 
         self.verbose = verbose
+
         self.visualize = visualize
+
+        self.ep_history = []
+
     
-    def select(self, state):
-        # state = (items, h_map, actions)
-        
-        items, h_map, actions = state
-#         print(len(indices(actions)))
-        action = self.heuristic(actions)
-            
-        return action
-    
-    def run(self, max_ep=1, verbose=False):
-        iters = (i for i, _ in enumerate(iter(bool, True))) if max_ep == -1 else range(max_ep)
-        
-        for ep in iters:
-            if verbose:
-                print(f'ep {ep}:')
-                
+
+    def run(self, n_episodes, verbose=False):
+
+        """Run using a heuristic function."""
+
+        for episode in range(n_episodes):
+
             state = self.env.reset()
-            ep_reward = 0
+
+            items, h_maps, actions = state
+
             
-            history = []
+
+            episode_reward = 0.0
+
+            episode_utils = []
+
+            done = False
+
             
-            for step in itertools.count():
-                if verbose:
-                    print(f'\nstep {step}')
-                    
-                items, h_map, actions = state
-                if len(actions) == 0: raise Exception('0 actions')
-                
-                action = self.select(state)
-                
-                if verbose:
-                    print(f'action: {action}')
-                
-                next_state, reward, done = self.env.step(action)
-                
-                history.append((state, action, next_state, reward, done))
-                
-                if verbose:
-                    print(f'actions: {actions}')
-                    print(f'reward: {reward}, done: {done}')
-                    print(f'placement: {actions[action[0]][action[1]][action[2]]}')
-                
-                yield actions[action[0]][action[1]][action[2]]
-                
-                ep_reward += reward
-                
-                if self.visualize:
-                    for i, packer in enumerate(self.env.packers):
-                        packer.render().savefig(f'./outputs/{ep}_{step}_{i}.jpg')
-                        
-                if done:
+
+            while not done:
+
+                if not actions or len(actions) == 0:
+
+                    done = True
+
                     break
+
                 
-                state = next_state
+
+                # chercher première action disponible (heuristique simple)
+
+                action = None
+
+                for i, item_actions in enumerate(actions):
+
+                    if item_actions:
+
+                        for j, bin_actions in enumerate(item_actions):
+
+                            if bin_actions:
+
+                                action = (i, j, 0)
+
+                                break
+
+                        if action:
+
+                            break
+
+                
+
+                if action is None:
+
+                    done = True
+
+                else:
+
+                    try:
+
+                        next_state, reward, done = self.env.step(action)
+
+                        items, h_maps, actions = next_state
+
+                        episode_reward += reward
+
+                        episode_utils.append(reward)
+
+                    except Exception as e:
+
+                        if verbose:
+
+                            print(f"Heuristic step error: {e}")
+
+                        done = True
+
             
-            self.ep_history.append(([packer.space_utilization() for packer in self.env.used_packers], self.env.used_bins, ep_reward))
+
+            self.ep_history.append((episode_utils, len(self.env.used_packers), episode_reward))
+
+            if verbose:
+
+                print(f"Episode {episode}: reward={episode_reward:.4f}")
+
             
-            yield None
-            
-            utils = [round(packer.space_utilization() * 100, 2) for packer in self.env.used_packers]
-            if self.verbose: print(f'Episode {ep}, util: {utils}, used bins: {self.env.used_bins}, ep_reward: {ep_reward:.2f}')
 
-def bottom_left(actions):
-    scores = []
-    for i, item in enumerate(actions):
-        for j, bin_ in enumerate(item):
-            for k, placement in enumerate(bin_):
-                item, (x, y, z), (w, h, d), _ = placement
-                y = y + h
-                x = x + w
-                z = z + d
-                scores.append(([y, x, z, i, j, k], [i, j, k]))
-        
-    indices = sorted(range(len(scores)), key=lambda i: scores[i][0])
-    return scores[indices[0]][1]
-
-def best_short_side_fit(actions):
-    scores = []
-    for i, item in enumerate(actions):
-        for j, bin_ in enumerate(item):
-            for k, placement in enumerate(bin_):
-                item, (x, y, z), (w, h, d), split = placement
-                W, H = split.width, split.height
-                scores.append(((min(W - w, H - h), i, j, k), [i, j, k]))
-        
-#     print(scores)
-    indices = sorted(range(len(scores)), key=lambda i: scores[i][0])
-    return scores[indices[0]][1]
-
-def best_area_fit(actions):
-    scores = []
-    for i, item in enumerate(actions):
-        for j, bin_ in enumerate(item):
-            for k, placement in enumerate(bin_):
-                item, (x, y, z), (w, h, d), split = placement
-                W, H = split.width, split.height
-                scores.append(((split.volume, min(W - w, H - h), i, j, k), [i, j, k]))
-        
-#     print(scores)
-    indices = sorted(range(len(scores)), key=lambda i: scores[i][0])
-    return scores[indices[0]][1]
-
-def best_long_side_fit(actions):
-    scores = []
-    for i, item in enumerate(actions):
-        for j, bin_ in enumerate(item):
-            for k, placement in enumerate(bin_):
-                item, (x, y, z), (w, h, d), split = placement
-                W, H = split.width, split.height
-                scores.append(((max(W - w, H - h), i, j, k), [i, j, k]))
-        
-    indices = sorted(range(len(scores)), key=lambda i: scores[i][0])
-    return scores[indices[0]][1]
+            yield (episode, episode_reward, episode_utils)

@@ -1,66 +1,49 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from geometry import Cuboid
 
 class Renderer:
-    def __init__(self):
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(projection='3d')
-        plt.close()
-        
+    def __init__(self, size=None):
+        self.size = size or (32, 32, 32)
+        self.fig = plt.figure(figsize=(6,6))
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self._drawn = []
+
     def clear(self):
-        self.ax.clear()
-        
-    def draw(self, box, color=None, mode='fill'):
-        if color is None:
-            color = (*np.random.random((3,)) * 0.7 + 0.3, 0.6)
-            
-        ax = self.ax
-        x, y, z = box.left, box.back, box.bottom
-        dx, dy, dz = box.width, box.depth, box.height
-        if mode == 'fill':
-            xx = np.linspace(x, x + dx, 2)
-            yy = np.linspace(y, y + dy, 2)
-            zz = np.linspace(z, z + dz, 2)
+        self.ax.cla()
+        self._drawn = []
 
-            xx, yy = np.meshgrid(xx, yy)
+    def draw(self, box, color='gray', mode='fill'):
+        # box: Cuboid(x,y,z,w,h,d)
+        # convert to cuboid faces and add Poly3DCollection (simple, opaque)
+        x0, y0, z0 = box.x, box.y, box.z
+        w, h, d = box.width, box.height, box.depth
+        verts = [
+            [(x0,y0,z0), (x0+w,y0,z0), (x0+w,y0+d,z0), (x0,y0+d,z0)],  # bottom
+            [(x0,y0,z0+h), (x0+w,y0,z0+h), (x0+w,y0+d,z0+h), (x0,y0+d,z0+h)],  # top
+            # ... 4 side faces ...
+        ]
+        poly = Poly3DCollection(verts, alpha=0.6 if mode=='fill' else 0)
+        poly.set_facecolor(color)
+        self.ax.add_collection3d(poly)
+        self._drawn.append(poly)
 
-            l1, l2 = xx.shape
-            z0 = np.ones([l1, l2]) * z
-            ax.plot_surface(xx, yy, z0, color=color)
-            ax.plot_surface(xx, yy, z0 + dz, color=color)
-
-            yy, zz = np.meshgrid(yy, zz)
-            ax.plot_surface(x, yy, zz, color=color)
-            ax.plot_surface(x + dx, yy, zz, color=color)
-
-            xx, zz = np.meshgrid(xx, zz)
-            ax.plot_surface(xx, y, zz, color=color)
-            ax.plot_surface(xx, y + dy, zz, color=color)
-        elif mode == 'stroke':
-            xx = [x, x, x + dx, x + dx, x]
-            yy = [y, y + dy, y + dy, y, y]
-            kwargs = {'alpha': 1, 'color': color}
-            ax.plot3D(xx, yy, [z] * 5, **kwargs)
-            ax.plot3D(xx, yy, [z + dz] * 5, **kwargs)
-            ax.plot3D([x, x], [y, y], [z, z + dz], **kwargs)
-            ax.plot3D([x, x], [y + dy, y + dy], [z, z + dz], **kwargs)
-            ax.plot3D([x + dx, x + dx], [y + dy, y + dy], [z, z + dz], **kwargs)
-            ax.plot3D([x + dx, x + dx], [y, y], [z, z + dz], **kwargs)
-            
-        return color
-    
     def show(self):
-        return (self.fig)
+        sx, sy, sz = self.size
+        self.ax.set_xlim(0, sx)
+        self.ax.set_ylim(0, sy)
+        self.ax.set_zlim(0, sz)
+        self.ax.set_box_aspect((sx, sy, sz))
+        plt.tight_layout()
+        return self.fig
         
-def render(size, spaces, colors):
-    r = Renderer()
-
+def render(size, spaces, colors=None):
+    r = Renderer(size=size)
     for box in spaces:
-        colors[box] = r.draw(box, color=colors[box] if box in colors else None)
-
-    r.draw(Cuboid(0, 0, 0, *size), color='red', mode='stroke')
+        r.draw(box, color='green', mode='fill')
+    r.draw(Cuboid(0,0,0, *size), color='red', mode='stroke')
     return r.show()
     
 class SpacePartitioner:
@@ -162,4 +145,3 @@ class SpacePartitioner:
         else:
             splits = self.splits
         return render(self.size, splits, self._colors)
-    

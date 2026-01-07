@@ -1,5 +1,5 @@
-# DeepPack3D
-**DeepPack3D** is a Python-based 3D bin-packing software optimized for robotic palletization systems. It supports various methods, including reinforcement learning (RL) and heuristic baselines, and provides flexible options for data input and visualization.
+# AI Driven Robotic Palletizing
+**AI Driven Robotic Palletizing** is a Python-based 3D bin-packing software optimized for robotic palletization systems. It supports various methods, including reinforcement learning (RL) and heuristic baselines, and provides flexible options for data input and visualization.
 
 <img src="./outputs/0_0_0.jpg" width="200"><img src="./outputs/0_1_0.jpg" width="200"><img src="./outputs/0_44_0.jpg" width="200">
 
@@ -19,8 +19,7 @@ You can refer to Tensorflow official website for the installation guideline.
 ### From repository
 1. Clone the repository:
 ```bash
-git clone https://github.com/zgtcktom/DeepPack3D.git  
-cd DeepPack3D
+git clone https://github.com/Jossy05-qiskit/AI-Driven-Robotic-Palletizing.git
 ```
 
 2. Install dependencies:
@@ -33,31 +32,21 @@ pip install -r requirements.txt
 ### From wheel
 Alternatively, you can create a distributable package.
 
-1. Creating a wheel
+
+1. Run python module
 ```bash
-python setup.py sdist bdist_wheel
+python deeppack3d.py rl 32 --data=file --path=.\inputpack.txt --verbose=1 --visualize
 ```
 
-2. Install wheel
+2. Train python module
 ```bash
-pip install ./dist/DeepPack3D-0.1.0-py3-none-any.whl
+python deeppack3d.py rl 32 --train --n_iterations=100 --verbose=1
 ```
 
-3. Run python module
+#### Example Command for run python module directly
 ```bash
-python -m deeppack3d rl 5 --n_iterations=-1 --data=file --path=./input.txt --verbose=1
-```
-
-## Usage
-### Command-Line Interface
-You can run DeepPack3D directly from the command line:
-
-```bash
-python deeppack3d.py <method> <lookahead> [options]
-```
-#### Example Command:
-```bash
-python deeppack3d.py bl 5 --n_iterations=-1 --data=file --path=./input.txt --verbose=1
+python result.py --method rl --lookahead 32 -v 1
+python run_packing.py rl 32 1
 ```
 
 #### Arguments:
@@ -90,7 +79,7 @@ Example:
 ```python
 from deeppack3d import deeppack3d
 
-for result in deeppack3d('rl', 5, n_iterations=-1, data='file', path='./input.txt', verbose=0):
+for result in deeppack3d('rl', 32, n_iterations=-1, data='file', path='./inputpack.txt', verbose=0):
 	if result is None:
 	 	print('new bin')
 		continue
@@ -100,11 +89,3 @@ for result in deeppack3d('rl', 5, n_iterations=-1, data='file', path='./input.tx
 
 ## Contributing
 Contributions are welcome! Feel free to open issues or submit pull requests to improve the software.
-
-## Citation/Reference
-If you find this package useful, please feel free to cite our following work.
-
-Tsang, Y. P., Mo, D. Y., Chung, K. T., & Lee, C. K. M. (2025). A deep reinforcement learning approach for online and concurrent 3D bin packing optimisation with bin replacement strategies. *Computers in Industry*, *164*, 104202. https://doi.org/10.1016/j.compind.2024.104202
-
-## License
-This project is licensed under the MIT License. See the LICENSE file for details.

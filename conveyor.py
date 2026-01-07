@@ -1,170 +1,193 @@
 import numpy as np
 from split_gen import *
+import itertools
 
 class ItemGenerator:
-    def __init__(self, k=1):
-        assert 0 < k, f'invalid argument k={k}'
+    def __init__(self, k=1, scale=1.0):
         self.k = k
-        
-    def reset(self): 
-        raise Exception('not implemened')
-        
+        self.scale = scale
+        self.items = []
+        self.index = 0
+
+    def reset(self):
+        """Réinitialise l'itérateur et retourne self (évite None)."""
+        self.index = 0
+        return self
+
     def peek(self):
-        # lookahead incoming (k) items
-        items = self._items
-        while len(items) < self.k:
-            try:
-                item = next(self._item_iter)
-            except:
-                item = None
-            items.append(item)
-        return items
-        
-    def grab(self, n=0):
-        assert 0 <= n < self.k, f'invalid argument n={n}'
-        return self.peek().pop(n)
+        """Retourne une liste des prochaines k tailles (ne modifie pas index)."""
+        if not self.items:
+            return None
+        res = []
+        n = len(self.items)
+        for i in range(self.k):
+            res.append(self.items[(self.index + i) % n])
+        return res
+
+    def next_item(self):
+        """Retourne l'item courant et avance l'index."""
+        if not self.items:
+            return None
+        item = self.items[self.index % len(self.items)]
+        self.index += 1
+        return item
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        it = self.next_item()
+        if it is None:
+            raise StopIteration
+        return it
+
 
 class FileConveyor(ItemGenerator):
-    def __init__(self, k=1, path='./input.txt'):
-        super().__init__(k)
-
-        self.path = path
-        
-        self._items = None
-        self._item_iter = None
-
-        self.loaded = False
-        
-    def _iter(self):
-        with open(self.path, 'r') as file:
-            for line in file.readlines():
-                w, h, d = map(int, line.split(' '))
-                yield w, h, d
-        
-    def reset(self):
-        if not self.loaded:
-            self.loaded = True
-            self.buffer = []
-            self._items = []
-            self._item_iter = self._iter()
-        return self
-
-class InputConveyor(ItemGenerator):
-    def __init__(self, k=1):
-        super().__init__(k)
-        
-        self._items = None
-        self._item_iter = None
-
-        self.loaded = False
-        
-    def _iter(self):
-        while True:
-            try:
-                input_str = input('item: ')
-                if input_str == '-1':
-                    break
-                w, h, d = map(int, input_str.split(' '))
-                yield (w, h, d)
-            except KeyboardInterrupt:
-                break
-            except:
-                print(f'invalid format. each line must contain [w: int] [h: int] [d: int]')
-                print(f'for example: 4 5 6')
-                continue
-        
-    def reset(self):
-        if not self.loaded:
-            self.loaded = True
-            self.buffer = []
-            self._items = []
-            self._item_iter = self._iter()
-        return self
-
-class Conveyor(ItemGenerator):
-    def __init__(self, k=1, prealloc_bins=0, prealloc_items=0, max_items=None, max_spaces=None, size=(32, 32, 32), lb=(6, 6, 6), ub=(12, 12, 12), p=0.0, p_decay=1.0, shuffle=False, assigned_items=None):
-        super().__init__(k)
-        
-        self._items = None
-        self._item_iter = None
-        
-        self.max_items = max_items
-        self.max_spaces = max_spaces
-        
-        if self.max_spaces is not None and self.prealloc_bins > self.max_spaces:
-            raise Exception('self.prealloc_bins > max_spaces')
-        
-        self.prealloc_bins = prealloc_bins
-        self.prealloc_items = prealloc_items
-        self.buffer = None
-        
-        self.assigned_items = assigned_items
-        
-        self.split_generator = lambda: nongullotine_cut(size, lb, ub, p, p_decay, shuffle=shuffle)
-        
-    def _iter(self):
-        if self.assigned_items is not None:
-            for item in (np.asarray(item) for item in self.assigned_items):
-                yield item
-            return
-        
-        n_items = 0
-        n_spaces = 0
-        
-        for split in self.buffer:
-            n_items += 1
-            if self.max_items is not None and n_items > self.max_items:
-                return
-            yield np.asarray(split.size)
-        n_spaces += self.prealloc_bins
-        
-        while True:
-            n_spaces += 1
-            if self.max_spaces is not None and n_spaces > self.max_spaces:
-                return
-                
-            splits = self.split_generator()
-            for split in splits:
-                n_items += 1
-                if self.max_items is not None and n_items > self.max_items:
-                    return
-                yield np.asarray(split.size)
-
-    def dump(self, n_items, path):
-        self.reset()
-        file = open(path, 'w')
-        for _ in range(n_items):
-            print(' '.join(map(str, self.grab())), file=file)
-        file.close()
-        
-    def reset(self):
-        self.buffer = [] # consistent rng
-        for i in range(self.prealloc_bins):
-            self.buffer.extend(self.split_generator())
-        
-        while len(self.buffer) < self.prealloc_items:
-            self.buffer.extend(self.split_generator())
-            
-        self._items = []
-        self._item_iter = self._iter()
-        return self
+    def __init__(self, filepath, k=1):
+        self.filepath = filepath
+        self.items = []
+        self.index = 0
+        self.k = k
+        self.debug = False
+        self._load_items()
     
+    def _load_items(self):
+        """Load items from file."""
+        try:
+            with open(self.filepath, 'r') as f:
+                lines = [line.strip() for line in f if line.strip()]
+            print(f"FileConveyor: read {len(lines)} lines from {self.filepath}")
+            
+            self.items = []
+            for line in lines:
+                parts = line.replace(',', ' ').split()
+                if len(parts) >= 3:
+                    try:
+                        w, h, d = int(parts[0]), int(parts[1]), int(parts[2])
+                        self.items.append((w, h, d))
+                    except ValueError:
+                        continue
+            
+            print(f"FileConveyor: loaded {len(self.items)} valid items.")
+        except Exception as e:
+            print(f"FileConveyor error: {e}")
+            self.items = []
+    
+    def reset(self):
+        """Reset to beginning (keep items loaded)."""
+        self.index = 0
+        if self.debug:
+            print(f"FileConveyor.reset(): index reset to 0, {len(self.items)} items available")
+    
+    def peek(self, k=None):
+        """Return next k items without removing them."""
+        if k is None:
+            k = self.k
+        result = []
+        for i in range(k):
+            idx = self.index + i
+            if idx < len(self.items):
+                result.append(self.items[idx])
+            else:
+                result.append(None)
+        
+        # DEBUG
+        if self.debug:
+            print(f"  DEBUG FileConveyor.peek({k}): index={self.index}, total={len(self.items)}, returning {result}")
+        return result
+    
+    def grab(self, item_idx=0):
+        """Remove item at item_idx from peek window."""
+        actual_idx = self.index + item_idx
+        if actual_idx < len(self.items):
+            self.items.pop(actual_idx)
+            if self.debug:
+                print(f"  DEBUG FileConveyor.grab({item_idx}): removed index {actual_idx}, {len(self.items)} remaining")
+        else:
+            if self.debug:
+                print(f"  WARNING FileConveyor.grab({item_idx}): index {actual_idx} out of range")
+
 def rotated_sizes(item, rotate=True, remove_duplicate=True):
-    if rotate is True:
-        rotate = 'xyz'
-    elif rotate is False:
-        rotate = ''
-    
     w, h, d = item
-    sizes = [(w, h, d)]
-    if 'x' in rotate:
-        sizes.extend((w, d, h) for w, h, d in sizes[:])
-    if 'y' in rotate:
-        sizes.extend((d, h, w) for w, h, d in sizes[:])
-    if 'z' in rotate:
-        sizes.extend((h, w, d) for w, h, d in sizes[:])
-            
+    rots = {(w, h, d)}
+    if rotate:
+        rots.update({(w, d, h), (h, w, d), (h, d, w), (d, w, h), (d, h, w)})
+    res = list(rots)
     if remove_duplicate:
-        sizes = list(set(sizes))
-        
-    return sizes
+        return res
+    else:
+        return list(itertools.permutations((w, h, d)))
+
+
+class InputConveyor:
+    """Simple conveyor for interactive/manual input (stub)."""
+    def __init__(self, k=1):
+        self.k = k
+        self.items = []
+        self.index = 0
+    
+    def reset(self):
+        self.index = 0
+        return self
+    
+    def peek(self, k=None):
+        if k is None:
+            k = self.k
+        result = []
+        for i in range(k):
+            idx = self.index + i
+            if idx < len(self.items):
+                result.append(self.items[idx])
+            else:
+                result.append(None)
+        return result
+    
+    def grab(self, item_idx=0):
+        actual_idx = self.index + item_idx
+        if actual_idx < len(self.items):
+            self.items.pop(actual_idx)
+
+
+class Conveyor:
+    """Generic conveyor stub."""
+    def __init__(self, k=1, **kwargs):
+        self.k = k
+        self.items = []
+        self.index = 0
+    
+    def reset(self):
+        self.index = 0
+        return self
+    
+    def peek(self, k=None):
+        if k is None:
+            k = self.k
+        return [None] * k
+    
+    def grab(self, item_idx=0):
+        pass
+
+
+# helper rotation function (simple placeholder)
+def rotated_sizes(item, rotate=True, remove_duplicate=True):
+    w, h, d = item
+    rots = {(w, h, d)}
+    if rotate:
+        rots.update({(w, d, h), (h, w, d), (h, d, w), (d, w, h), (d, h, w)})
+    res = list(rots)
+    if remove_duplicate:
+        return res
+    else:
+        return list(itertools.permutations((w, h, d)))
+
+# lorsque tu instancies le conveyor pour deeppack3d :
+# file_conv = FileConveyor(k=4, path='inputpack.txt', scale=1.0)  # scale=1.0 → mm inchangé
+
+# === COMMENTER OU SUPPRIMER CES LIGNES (tout en bas du fichier) ===
+# file_conv = FileConveyor(k=4, path='inputpack.txt', scale=1.0)
+# OU remplacer par :
+if __name__ == "__main__":
+    # Code de test uniquement si exécuté directement
+    file_conv = FileConveyor('inputpack.txt')
+    file_conv.reset()
+    print(f"Test: {len(file_conv.items)} items loaded")

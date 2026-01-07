@@ -1,0 +1,737 @@
+/* Action created by RTA15 8/13/2025 */
+/*
+*Initializing the parent cell argument along with its VPMReference
+*/
+
+let pPallCellOcc(ProductOccurrence)
+pPallCellOcc = parentPallCellOcc
+let pPallCellRef(VPMReference)
+pPallCellRef = pPallCellOcc.Reference
+
+// Initializing the Excel Sheet
+let rscSheet(DTSheetType)
+Set rscSheet = CreateSheet("PalletizingResourcesNames")
+
+let rscRowIndex(Integer)		// The row in the sheet
+rscRowIndex = 1
+let rscColIndex(Integer)		// The column in the sheet
+rscColIndex = 1
+let rscNoOfCols(Integer)		// The number of columns in the rscSheet
+rscNoOfCols = rscSheet.ColumnsNb
+
+// Initializing the table column identifiers
+let ROBOTARMCOL, WELDGUNCOL, CARTONCOL, PALETTECOL, CONVOYEURCOL(Integer)
+ROBOTARMCOL = 1
+WELDGUNCOL = 2
+CARTONCOL = 3
+PALETTECOL = 4
+CONVOYEURCOL = 5
+
+// Initializing the column length information
+let robotArmColLength, weldGunColLength, cartonColLength, paletteColLength, convoyeurColLength(Integer)
+let rscColumnLengthList(List)
+
+let tmpValueCheck(String)
+let emptyString(String)
+emptyString = ""
+let loopCheck(Integer)
+
+for rscColIndex while rscColIndex <= rscNoOfCols
+{
+	rscRowIndex = 1
+	tmpValueCheck = rscSheet.CellAsString(rscRowIndex, rscColIndex)
+	loopCheck = 2
+	for loopCheck while loopCheck > 1
+	{
+		if (tmpValueCheck <> emptyString)
+		{
+			rscRowIndex = rscRowIndex + 1
+			tmpValueCheck = rscSheet.CellAsString(rscRowIndex, rscColIndex)
+		}
+		else
+		{
+			loopCheck = 1
+			rscColumnLengthList.Append(rscRowIndex-1)
+		}
+	}
+}
+
+robotArmColLength = rscColumnLengthList[ROBOTARMCOL]
+weldGunColLength = rscColumnLengthList[WELDGUNCOL]
+cartonColLength = rscColumnLengthList[CARTONCOL]
+paletteColLength = rscColumnLengthList[PALETTECOL]
+convoyeurColLength = rscColumnLengthList[CONVOYEURCOL]
+
+
+// Initialzing x and y positions variables, so combinations are in different positions
+let xPosOffset, yPosOffset, POSOFFSET(Real)
+xPosOffset = 0
+yPosOffset = 0
+POSOFFSET = 3000
+
+// Beginning of the loop in order to create every possible combination between robotArms and weldGuns
+let robotArmIndex, weldGunIndex, cartonIndex, paletteIndex, convoyeurIndex(Integer)
+let robotName, weldGunName, cartonName, paletteName, convoyeurName, tmpCombination1Name, tmpCombination2Name(String)
+robotArmIndex = 1
+weldGunIndex = 1
+cartonIndex = 1
+paletteIndex = 1
+convoyeurIndex = 1
+
+for robotArmIndex while robotArmIndex <= robotArmColLength
+{	
+	
+	// --- Lire les noms de la ligne courante ---
+	
+	robotName     = rscSheet.CellAsString(robotArmIndex, ROBOTARMCOL)
+	weldGunName   = rscSheet.CellAsString(weldGunIndex, WELDGUNCOL)
+	cartonName    = rscSheet.CellAsString(cartonIndex, CARTONCOL)
+	paletteName   = rscSheet.CellAsString(paletteIndex, PALETTECOL)
+	convoyeurName = rscSheet.CellAsString(convoyeurIndex, CONVOYEURCOL)
+	tmpCombination1Name = robotName + "+" + weldGunName
+	tmpCombination2Name = cartonName + "+" + paletteName + "+" + convoyeurName
+	
+	// Créer Cellules d’organisation (une “ressources robot+weldgun”, une “carton+palette+convoyeur”)
+	let newMfgCellRef, newMfgCell2Ref(VPMReference)
+	let newMfgCellInst, newMfgCell2Inst(VPMInstance)
+	
+	let newMfgCellName, newMfgCell2Name(String)
+	newMfgCellName = tmpCombination1Name
+	newMfgCell2Name = tmpCombination2Name
+	
+	newMfgCellRef    = new("Organizational", newMfgCellName,  NULL)
+	newMfgCell2Ref = new("Organizational", newMfgCell2Name, NULL)
+	
+	let newMfgCellInstName, newMfgCell2InstName(String)
+	newMfgCellInstName = "Combination_" + robotArmIndex + "_" + weldGunIndex
+	newMfgCell2InstName = "Combination_" + cartonIndex + "_" + paletteIndex + "_" + convoyeurIndex
+	
+	newMfgCellInst    = new("VPMInstance", newMfgCellInstName, pPallCellRef, newMfgCellRef)
+	newMfgCell2Inst = new("VPMInstance", newMfgCell2InstName, pPallCellRef, newMfgCell2Ref)
+	
+	// Query Creation Declaration for robotArm
+	let robotArmQuery(PLMQuery)
+	let robotArmResults(List)
+	let robotArmCurrentResult(PLMQueryResult)
+	let robotArmCurrentResultLoaded(VPMReference)
+	
+	// Creating the robotArm Query
+	robotArmQuery = CreatePLMQuery("VPMReference")
+	robotArmQuery.AddCriterion("PLM_ExternalID", robotName)
+	
+	// Running the robotArm Query
+	robotArmResults = robotArmQuery.RunQuery()
+	
+	for robotArmCurrentResult inside robotArmResults
+	{
+		set robotArmCurrentResultLoaded = robotArmCurrentResult.LoadResult()
+	}
+	
+	// Initializing the robotArm
+	let robotArmRef(VPMReference)
+	robotArmRef = robotArmCurrentResultLoaded
+	
+	// Initializing the new name for the robotArm with respect to its' combination
+	let robotArmTitle(String)
+	robotArmTitle = robotArmRef.V_Name
+	let robotArmNewName(String)
+	robotArmNewName = robotArmTitle + "." + ToString(robotArmIndex)
+	
+	// Initailizing the new VPMInstance for the robotArm
+	let robotArmInst(VPMInstance)
+	robotArmInst = new("VPMInstance", robotArmNewName, newMfgCellRef, robotArmRef)
+	
+	// Query Creation Declaration for weldGun
+	let weldGunQuery(PLMQuery)
+	let weldGunResults(List)
+	let weldGunCurrentResult(PLMQueryResult)
+	let weldGunCurrentResultLoaded(VPMReference)
+	
+	// Creating the weldGun Query
+	weldGunQuery = CreatePLMQuery("VPMReference")
+	weldGunQuery.AddCriterion("PLM_ExternalID", weldGunName)
+	
+	// Running the weldGun Query
+	weldGunResults = weldGunQuery.RunQuery()
+	
+	for weldGunCurrentResult inside weldGunResults
+	{
+		set weldGunCurrentResultLoaded = weldGunCurrentResult.LoadResult()
+	}
+	
+	// Initializing the weldGun VPMReference
+	let weldGunRef(VPMReference)
+	weldGunRef = weldGunCurrentResultLoaded
+	
+	// Initializing the new name for the weldGun with respect to its' combination
+	let weldGunTitle(String)
+	weldGunTitle = weldGunRef.V_Name
+	let weldGunNewName(String)
+	weldGunNewName = weldGunTitle + "." + ToString(weldGunIndex)
+	
+	// Initializing the new VPMInstance for the weldGun
+	let weldGunInst(VPMInstance)
+	weldGunInst = new("VPMInstance", weldGunNewName, newMfgCellRef, weldGunRef)
+	
+	
+	// Query + Instanciation Carton / Palette / Convoyeur (si présents)
+	
+	let cartonInst, paletteInst, convoyeurInst(VPMInstance)
+	let cartonTitle, paletteTitle, convoyeurTitle(String)
+	
+	let baseCartonRef(VPMReference)
+	baseCartonRef = NULL
+	
+	let cartonLength, cartonWidth, cartonHeight(Real)
+	cartonLength = 300
+	cartonWidth = 300
+	cartonHeight = 300
+	
+	let convoyeurLength, convoyeurWidth, convoyeurHeight (Real)
+	convoyeurLength = 4300
+	convoyeurWidth = 500
+	convoyeurHeight = 500
+	
+	let paletteLength, paletteWidth, paletteHeight(Real)
+	paletteLength = 1200
+	paletteWidth = 1200
+	paletteHeight = 145
+	
+	
+	
+	if (paletteName <> "")
+	{
+		let paletteRef(VPMReference)
+		let paletteQuery(PLMQuery)
+		let paletteResults(List)
+		let paletteCurrentResult(PLMQueryResult)
+		paletteQuery = CreatePLMQuery("VPMReference")
+		paletteQuery.AddCriterion("PLM_ExternalID", paletteName)
+		paletteResults = paletteQuery.RunQuery()
+		for paletteCurrentResult inside paletteResults { set paletteRef = paletteCurrentResult.LoadResult() }
+		if (paletteRef <> NULL)
+		{	
+			paletteTitle = paletteRef.V_Name
+			let paletteNewName(String)
+			paletteNewName = paletteTitle + "." + ToString(paletteIndex)
+			paletteInst = new("VPMInstance", paletteNewName, newMfgCell2Ref, paletteRef)
+		}
+	}
+	
+	if (convoyeurName <> "")
+	{
+		let convoyeurRef(VPMReference)
+		let convoyeurQuery(PLMQuery)
+		let convoyeurResults(List)
+		let convoyeurCurrentResult(PLMQueryResult)
+		convoyeurQuery = CreatePLMQuery("VPMReference")
+		convoyeurQuery.AddCriterion("PLM_ExternalID", convoyeurName)
+		convoyeurResults = convoyeurQuery.RunQuery()
+		for convoyeurCurrentResult inside convoyeurResults { set convoyeurRef = convoyeurCurrentResult.LoadResult() }
+		if (convoyeurRef <> NULL)
+		{	
+			convoyeurTitle = convoyeurRef.V_Name
+			let convoyeurNewName(String)
+			convoyeurNewName = convoyeurTitle + "." + ToString(convoyeurIndex)
+			convoyeurInst = new("VPMInstance", convoyeurNewName, newMfgCell2Ref, convoyeurRef)
+		}
+	}
+	
+	// Changing the name of the newMfgCellRef to be more representable
+	newMfgCellRef.SetAttributeString("V_Name", robotArmTitle + "+" + weldGunTitle)
+	
+	
+	// Positionner le robot (et donc la cellule) avec un offset par LIGNE
+	let rscTransform(RscTransform)
+	rscTransform = GetRscTransform()
+	rscTransform.SetXYZ(xPosOffset, yPosOffset, 0.0)
+	rscTransform.SetRPY(0,0,0)
+	
+	let robotArmMatrix(Matrix)
+	robotArmMatrix = robotArmInst.PositionMatrix
+	let coef(List)
+	coef = rscTransform.GetTransformCoefficients()
+	if (coef.Size() == 12)
+	{
+		robotArmMatrix.Set(1,1,coef[1])
+		robotArmMatrix.Set(2,1,coef[2])
+		robotArmMatrix.Set(3,1,coef[3])
+		robotArmMatrix.Set(1,2,coef[4])
+		robotArmMatrix.Set(2,2,coef[5])
+		robotArmMatrix.Set(3,2,coef[6])
+		robotArmMatrix.Set(1,3,coef[7])
+		robotArmMatrix.Set(2,3,coef[8])
+		robotArmMatrix.Set(3,3,coef[9])
+		robotArmMatrix.Set(1,4,coef[10])
+		robotArmMatrix.Set(2,4,coef[11])
+		robotArmMatrix.Set(3,4,coef[12])
+		robotArmInst.PositionMatrix = robotArmMatrix
+	}
+	
+	
+	// Positionner la palette
+	let posPalX, posPalY, posPalZ(Real)
+	posPalX = 2000
+	posPalY = -600
+	posPalZ = 0.0
+	
+	// Positionner la PALETTE (parallèle au robot, +1600 mm en X)
+	if (paletteInst <> NULL)
+	{	
+		
+		let palT(RscTransform)
+		palT = GetRscTransform()
+		// position relative au robot
+		palT.SetXYZ(xPosOffset + posPalX, yPosOffset + posPalY, posPalZ)
+		palT.SetRPY(0,0,0)
+		
+		let palM(Matrix)
+		palM = paletteInst.PositionMatrix
+		let c(List)
+		c = palT.GetTransformCoefficients()
+		if (c.Size() == 12)
+		{
+			palM.Set(1,1,c[1])
+			palM.Set(2,1,c[2])
+			palM.Set(3,1,c[3])
+			palM.Set(1,2,c[4])
+			palM.Set(2,2,c[5])
+			palM.Set(3,2,c[6])
+			palM.Set(1,3,c[7])
+			palM.Set(2,3,c[8])
+			palM.Set(3,3,c[9])
+			palM.Set(1,4,c[10])
+			palM.Set(2,4,c[11])
+			palM.Set(3,4,c[12])
+			paletteInst.PositionMatrix = palM
+		}
+	}
+	
+	// Positionner le convoyeur
+	let posConvX, posConvY, posConvZ(Real)
+	posConvX = 0.0
+	posConvY = 5300
+	posConvZ = 0.0
+	
+	// Positionner le CONVOYEUR (parallèle au robot, +2800 mm en Y)
+	if (convoyeurInst <> NULL)
+	{
+		
+		let convT(RscTransform)
+		convT = GetRscTransform()
+		// position relative au robot
+		convT.SetXYZ(xPosOffset + posConvX, yPosOffset + posConvY, posConvZ)
+		convT.SetRPY(0,0,0)
+		
+		let convM(Matrix)
+		convM = convoyeurInst.PositionMatrix
+		let c2(List)
+		c2 = convT.GetTransformCoefficients()
+		if (c2.Size() == 12)
+		{
+			convM.Set(1,1,c2[1])
+			convM.Set(2,1,c2[2])
+			convM.Set(3,1,-c2[3])
+			convM.Set(1,2,-c2[4])
+			convM.Set(2,2,-c2[5])
+			convM.Set(3,2,c2[6])
+			convM.Set(1,3,c2[7])
+			convM.Set(2,3,c2[8])
+			convM.Set(3,3,c2[9])
+			convM.Set(1,4,c2[10])
+			convM.Set(2,4,c2[11])
+			convM.Set(3,4,c2[12])
+			convoyeurInst.PositionMatrix = convM
+		}
+	}
+	
+	
+	// Initializing the new manufacturing cell's occurrence
+	
+	// Initializing the new manufacturing cell's occurrence
+	pPallCellRef.UpdateListOccurrences()
+	
+	let newMfgCellOcc, newMfgCell2Occ(ProductOccurrence)
+	let listChildren(List)
+	listChildren = pPallCellOcc.Children
+	
+	let r(Integer)
+	r = 1
+	for r while r <= listChildren.Size()
+	{
+		// 1) récupérer l’élément comme objet générique
+		let obj(DatabaseObjectType)
+		set obj = listChildren[r]
+		
+		// 2) beaucoup d’objets n’ont pas d’Instance -> on ignore
+		let inst(VPMInstance)
+		set inst = obj.GetAttributeObject("Instance")
+		if inst == NULL
+		{
+			r = r + 1
+			continue
+		}
+		
+		// 3) si l’instance correspond, on caste en ProductOccurrence
+		if inst == newMfgCellInst and newMfgCellOcc == NULL
+		{
+			let po(ProductOccurrence)
+			set po = obj
+			newMfgCellOcc = po
+		}
+		
+		if inst == newMfgCell2Inst and newMfgCell2Occ == NULL
+		{
+			let po2(ProductOccurrence)
+			set po2 = obj
+			newMfgCell2Occ = po2
+		}
+		
+		if (newMfgCellOcc <> NULL) and (newMfgCell2Occ <> NULL)
+		{
+			break
+		}
+		
+		r = r + 1
+	}
+	
+	
+	
+	
+	// Initializing the robotArm's, weldGuns, cartons and palettes occurrences
+	let robotArmOcc, weldGunOcc, cartonOcc, paletteOcc, convoyeurOcc(ProductOccurrence)
+	
+	let tmpOcc(ProductOccurrence)
+	let tmpOccList(List)
+	
+	tmpOccList = newMfgCellOcc.Children
+	for tmpOcc inside tmpOccList
+	{
+		if (tmpOcc.Instance == robotArmInst)		// Looking for the robotArmInst
+		{
+			robotArmOcc = tmpOcc			// Retrieve robotArmOcc
+			break
+		}
+	}
+	
+	tmpOccList = newMfgCellOcc.Children
+	for tmpOcc inside tmpOccList
+	{
+		if (tmpOcc.Instance == weldGunInst)		// Looking for the weldGunInst
+		{
+			weldGunOcc = tmpOcc			// Retrieve weldGunOcc
+			break
+		}
+	}
+	
+	tmpOccList = newMfgCell2Occ.Children
+	for tmpOcc inside tmpOccList
+	{
+		if tmpOcc.Instance == cartonInst
+		{
+			cartonOcc = tmpOcc
+			break
+		}
+	}
+	
+	tmpOccList = newMfgCell2Occ.Children
+	for tmpOcc inside tmpOccList
+	{
+		if (tmpOcc.Instance == paletteInst)		// Looking for the paletteInst
+		{
+			paletteOcc = tmpOcc			// Retrieve paletteOcc
+			break
+		}
+	}
+	
+	tmpOccList = newMfgCell2Occ.Children
+	for tmpOcc inside tmpOccList
+	{
+		if (tmpOcc.Instance == convoyeurInst)		// Looking for the convoyeurInst
+		{
+			convoyeurOcc = tmpOcc			// Retrieve convoyeurOcc
+			break
+		}
+	}
+	
+	
+	
+	// Initializing the robotArm's mount manager, port manager, the weldGun's port manager, the palette's port manager and the conveyor's port manager
+	let robotArmMountMgr(RscMountsMgr)
+	robotArmMountMgr = robotArmOcc.GetRscMounts()
+	let robotArmPortsMgr(RscPortsMgr)
+	robotArmPortsMgr = robotArmOcc.GetRscPorts()
+	let weldGunPortsMgr(RscPortsMgr)
+	weldGunPortsMgr = weldGunOcc.GetRscPorts()
+	
+	
+	// Declaring the port variables that the robotArm, weldGun, carton and palette should have
+	let robotArmMountPort(VPMPort)
+	let weldGunBasePort(VPMPort)
+	let weldGunTCPPort(VPMPort)
+	let tmpPortList(List)
+	
+	
+	// Initializing the robotArm's mount port
+	tmpPortList = robotArmPortsMgr.GetRscPortObjects(2)		// 2 is RscPortType "Mount port"
+	if (tmpPortList.Size() > 0)
+	{
+		robotArmMountPort = tmpPortList[1]
+	}
+	
+	// Initializing the weldGun's base port
+	tmpPortList = weldGunPortsMgr.GetRscPortObjects(1)			// 1 is RscPortType "Base Port"
+	if (tmpPortList.Size() > 0)
+	{
+		weldGunBasePort = tmpPortList[1]
+	}
+	
+	// Initializing the weldGun's tcp port
+	tmpPortList = weldGunPortsMgr.GetRscPortObjects(3)			// 3 is RscPortType "TCP port"
+	if (tmpPortList.Size() > 0)
+	{
+		weldGunTCPPort = tmpPortList[1]
+	}
+	
+	
+	// Fix Transformation for Mount (Values set for initialization and simplication of use)
+	let myRscTransform(RscTransform)
+	myRscTransform = GetRscTransform()
+	myRscTransform.SetXYZ(0,0,0)
+	myRscTransform.SetRPY(0,0,0)
+	
+	// Initializing the weld gun's mount type
+	let weldGunMountType(RscControllerUsageType)
+	weldGunMountType = 'EndOfArm'
+	
+	// Initializing a new control equipment occurrence
+	let controlOcc(ProductOccurrence)
+	controlOcc = robotArmMountMgr.CreateMountControlEquipment(robotArmNewName + "_Control")
+	
+	
+	// Mounting the weldGun to the robotArm
+	robotArmMountMgr.MountResourcePortAs(weldGunMountType, robotArmMountPort, weldGunOcc, weldGunBasePort, weldGunTCPPort, controlOcc, myRscTransform, true)
+	
+	
+	// Creating the new home position for the robotArm
+	let homePosName(String)
+	homePosName = "EKL_Home"
+	let robotArmRscController(RscController)
+	robotArmRscController = robotArmOcc.GetRscController()
+	let robotArmHomeMgr(RscHomePositionMgr)
+	robotArmHomeMgr = robotArmRscController.GetHomePositionMgr()
+	
+	let robotArmJointValueList(List)
+	robotArmJointValueList[1] = 0
+	robotArmJointValueList[2] = 0
+	robotArmJointValueList[3] = 0
+	robotArmJointValueList[4] = 0
+	robotArmJointValueList[5] = 10*PI/180			// 10deg for 5th DOF since it's a rotation command
+	robotArmJointValueList[6] = 0
+	
+	let robotArmMotionGroup(RscMotionGroup)
+	robotArmHomeMgr.CreateHomePosition(robotArmMotionGroup, homePosName, robotArmJointValueList)
+	
+	// Applying the robots EKL_Home positions
+	robotArmHomeMgr.ApplyHomePosition(robotArmMotionGroup, homePosName)
+	
+	// Initializing the robotArm's resource occurence
+	let robotArmRscOcc(ResourceOccurrence)
+	let tmpRscOcc(ResourceOccurrence)
+	let tmpRscOccList(List)
+	
+	tmpRscOccList = newMfgCellOcc.Children
+	for tmpRscOcc inside tmpRscOccList
+	{
+		if (tmpRscOcc.Instance == robotArmInst)		// Looking for the robotArmInst
+		{
+			robotArmRscOcc = tmpRscOcc		// Retrieve robotArmRscOcc
+			break
+		}
+	}
+	
+	
+	
+	// Stratégie de Palettisation
+	// 4. Animation + Détection + Palettisation dynamique
+	let m(Integer)
+	m = 0
+	
+	let tailleCarton(List)
+	let cartonIniMatrix, cartonFinMatrix(Matrix)
+	
+	if (cartonName <> "")
+	{
+		// Query Creation Declaration for carton
+		let cartonQuery(PLMQuery)
+		let cartonResults(List)
+		let cartonCurrentResult(PLMQueryResult)
+		let cartonCurrentResultLoaded(VPMReference)
+		
+		// Creating the carton Query
+		cartonQuery = CreatePLMQuery("VPMReference")
+		cartonQuery.AddCriterion("PLM_ExternalID", cartonName)
+		
+		// Running the carton Query
+		cartonResults = cartonQuery.RunQuery()
+		
+		for cartonCurrentResult inside cartonResults
+		{
+			set cartonCurrentResultLoaded = cartonCurrentResult.LoadResult()
+		}
+		
+		// Initializing the carton VPMReference
+		let cartonRef(VPMReference)
+		cartonRef = cartonCurrentResultLoaded
+		cartonTitle = cartonRef.V_Name
+		
+		newMfgCell2Ref.SetAttributeString("V_Name", cartonTitle + "+" + paletteTitle + "+" + convoyeurTitle)
+		
+		if (cartonRef <> NULL)
+		{
+			baseCartonRef = cartonRef
+		}
+		
+		// Seed pour l'aléatoire (basé sur l'heure)
+		let d(Date)
+		let sDate(String)
+		let seedI(Integer)
+		
+		sDate  = DateFormat("%H%M%S", BuildDate())
+		seedI  = sDate->ToReal():Integer
+		SRand(seedI)  // initialise la séquence de Rand()
+		
+		
+		// 2. Créer 26 cartons avec la boucle de création des tailles
+		
+		let k(Integer)
+		k = 0
+		for k while k <= 0
+		{
+			// Aléatoire entre 300 et 900
+			let lengthVar(Real)
+			lengthVar = 300.0 + Rand() * (900 - 300)
+			
+			// Largeur aléatoire entre 500 et 900
+			let widthVar(Real)
+			widthVar = 300.0 + Rand() * (900.0 - 300)
+			
+			let cartonData(List)
+			cartonData = List(k, lengthVar, widthVar, cartonHeight)
+			tailleCarton.Append(cartonData)
+		}
+		
+		
+		
+		// Génération des 26 cartons à la même position
+		let i(Integer)
+		i = 0
+		for i while i < tailleCarton.Size()
+		{	
+			// Sécurité : sans référence, on ne peut pas créer les cartons
+			if (baseCartonRef == NULL)
+			{
+				Notify("Aucune référence carton trouvée : impossible de générer les cartons.")
+				continue
+			}
+			
+			// Nom unique
+			let cartonInstName(String)
+			cartonInstName = "Carton_" + ToString(i + 1)
+			
+			// Création instance
+			cartonInst = new("VPMInstance", cartonInstName, newMfgCell2Ref, baseCartonRef)
+			
+			
+			// Position des cartons : tous au même endroit sur le convoyeur
+			
+			let cartonIniTransform(RscTransform)
+			cartonIniTransform = GetRscTransform()
+			cartonIniTransform.SetXYZ(xPosOffset + posConvX + 250, yPosOffset + posConvY - 800, posConvZ)
+			cartonIniTransform.SetRPY(0,0,0)
+			
+			
+			cartonIniMatrix = cartonInst.PositionMatrix
+			let transformCoefIni(List)
+			transformCoefIni = cartonIniTransform.GetTransformCoefficients()
+			
+			if transformCoefIni.Size() == 12
+			{
+				cartonIniMatrix.Set(1,1,transformCoefIni[1])
+				cartonIniMatrix.Set(2,1,transformCoefIni[2])
+				cartonIniMatrix.Set(3,1,transformCoefIni[3])
+				cartonIniMatrix.Set(1,2,transformCoefIni[4])
+				cartonIniMatrix.Set(2,2,transformCoefIni[5])
+				cartonIniMatrix.Set(3,2,transformCoefIni[6])
+				cartonIniMatrix.Set(1,3,transformCoefIni[7])
+				cartonIniMatrix.Set(2,3,transformCoefIni[8])
+				cartonIniMatrix.Set(3,3,transformCoefIni[9])
+				cartonIniMatrix.Set(1,4,transformCoefIni[10])
+				cartonIniMatrix.Set(2,4,transformCoefIni[11])
+				cartonIniMatrix.Set(3,4,transformCoefIni[12])
+				cartonInst.PositionMatrix = cartonIniMatrix
+			}
+			
+		}	
+		
+	}
+	
+	
+	for m while m < tailleCarton.Size()
+	{
+		// Fonction pour récupérer l’occurrence d’un carton par son index (i.e. Carton_1, Carton_2, ...)
+		
+		let index(Integer)
+		index = m
+		
+		let occList(List)
+		occList = newMfgCell2Occ.Children
+		
+		let currentCartonOcc(ProductOccurrence)
+		
+		
+		let targetName(String)
+		targetName = "Carton_" + ToString(index + 1)
+		
+		for tmpOcc inside occList
+		{
+			if tmpOcc.Instance <> NULL
+			{
+				if tmpOcc.Instance.GetAttributeString("Name") == targetName
+				{
+					cartonOcc = tmpOcc
+					break
+				}
+			}
+		}
+		currentCartonOcc = cartonOcc
+		
+		m = m + 1
+		// Incrementing position offsets for robotArm_weldGun combination locations
+		yPosOffset = yPosOffset + POSOFFSET
+	}	
+	
+	// Préparer la prochaine ligne → décaler X
+	xPosOffset = xPosOffset + POSOFFSET
+	yPosOffset = 0  // pour reboucler sur autre chose
+	
+	// Ligne suivante
+	robotArmIndex = robotArmIndex + 1
+}
+
+
+// Creating a new simulation state
+
+FitAllIn()
+
+let rscSimStateName(String)
+rscSimStateName = "PAL Home"
+let optList(List)
+optList = List("ContextGlobal", "ScopeSelected", "ActCreate")
+
+let rscSimState(DEL3DState)
+rscSimState = pPallCellOcc.Create3DState(rscSimStateName, optList)
+
+pPallCellRef.UpdateListOccurrences()
+rscSimState.Recapture3DState(pPallCellOcc)
+rscSimState.SetActive3DState(1)			// Integer to set rscSimState to the active state

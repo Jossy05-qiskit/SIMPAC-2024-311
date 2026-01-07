@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='DeepPack3D',
+    name='AI Driven Robotic Palletizing',
     version='0.1.0',
-    author='ckt.tomchung',
-    author_email='ckt.tomchung@gmail.com',
+    author='TCHIBINDA MAKOMPA Romael Jossy',
+    author_email='jossytchibinda@gmail.com',
     description='Reinforcement learning-based optimizer for 3D bin packing problem',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
-    url='https://github.com/zgtcktom/Reinforcement-Learning-for-Online-3D-Bin-Packing',
+
     packages=find_packages(),
     install_requires=[
         'numpy==1.26.4',
